@@ -1,0 +1,140 @@
+pipeline:
+  name: HCL
+  identifier: HCL
+  projectIdentifier: HCL_Hackathon
+  orgIdentifier: default
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: account.Santhosh0637
+        repoName: hackathon-usecase
+        build: <+input>
+  stages:
+    - stage:
+        name: Build
+        identifier: Build
+        description: ""
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: false
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Build
+                  identifier: Build
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: maven:3.9-eclipse-temurin-17
+                    shell: Sh
+                    command: |-
+                      ls
+
+                      java -version
+                      cd order-service
+
+                      mvn clean install
+
+                      cd target
+
+                      ls -lrt
+              - step:
+                  identifier: BuildAndPushGAR_1
+                  type: BuildAndPushGAR
+                  name: BuildAndPushGAR_1
+                  spec:
+                    connectorRef: s
+                    host: asia-south1-docker.pkg.dev
+                    projectID: capable-quanta-331506
+                    imageName: orderservice/orderservice
+                    tags:
+                      - latest
+                    dockerfile: order-service/Dockerfile
+                    context: order-service
+                  timeout: 10m
+                contextType: Pipeline
+              - parallel:
+                  - step:
+                      type: BuildAndPushDockerRegistry
+                      name: OrderService
+                      identifier: BuildAndPushDockerRegistry_1
+                      spec:
+                        connectorRef: account.dokcerHub
+                        repo: santhosh0637/orderservice
+                        tags:
+                          - latest
+                        dockerfile: order-service/Dockerfile
+                        context: order-service
+                  - step:
+                      type: BuildAndPushDockerRegistry
+                      name: PatientService
+                      identifier: PatientService
+                      spec:
+                        connectorRef: account.dokcerHub
+                        repo: santhosh0637/patient
+                        tags:
+                          - latest
+                        dockerfile: order-service/Dockerfile
+                        context: order-service
+                  - step:
+                      type: BuildAndPushDockerRegistry
+                      name: application_service
+                      identifier: application_service
+                      spec:
+                        connectorRef: account.dokcerHub
+                        repo: santhosh0637/applicationservice
+                        tags:
+                          - latest
+                        dockerfile: application-service/Dockerfile
+                        context: application-service
+    - stage:
+        name: Deploy
+        identifier: Deploy
+        description: ""
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: service
+          environment:
+            environmentRef: Dev
+            deployToAll: false
+            infrastructureDefinitions:
+              - identifier: K8s
+          execution:
+            steps:
+              - step:
+                  name: Rollout Deployment
+                  identifier: rolloutDeployment
+                  type: K8sRollingDeploy
+                  timeout: 10m
+                  spec:
+                    skipDryRun: false
+                    pruningEnabled: false
+            rollbackSteps:
+              - step:
+                  name: Rollback Rollout Deployment
+                  identifier: rollbackRolloutDeployment
+                  type: K8sRollingRollback
+                  timeout: 10m
+                  spec:
+                    pruningEnabled: false
+        tags: {}
+        failureStrategies:
+          - onFailure:
+              errors:
+                - AllErrors
+              action:
+                type: StageRollback
+        delegateSelectors:
+          - kubernetes-delegate
